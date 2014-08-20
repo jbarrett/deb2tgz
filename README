@@ -1,0 +1,7 @@
+deb2tgz
+=======
+
+Debian -> tarball / Slackware package conversion tool.
+
+Basic functionality works, needs a lot of testing and validation
+

@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright 2014, John Barrett <john@jbrt.org>
+#
+# Based on rpm2targz:
 # Copyright 1997, 1998  Patrick Volkerding, Moorhead, MN USA
 # Copyright 2002, 2004  Slackware Linux, Inc., Concord, CA USA
 # Copyright 2006, 2009  Patrick Volkerding, Sebeka, MN USA
@@ -31,7 +34,7 @@ usage() {
   echo "            with \"installpkg\", \"removepkg\", \"pkgtool\", or manually"
   echo "            with \"tar\")"
   echo
-  if [ "$(basename $0)" = "deb2tgz" ]; then
+  if [ "$(basename $0)" = "deb2tgz" -o "$(basename $0)" = "deb2txz" ]; then
     echo "Usage:      $0 [OPTION] <file.deb>"
     echo "            (Outputs \"file.tgz\")"
     echo
@@ -82,11 +85,37 @@ make_temp_dir() {
 
 # Get the meta data off of the deb
 get_meta_data() {
-  RPM=$1
-  PRGNAM=$(deb -qp --qf %{NAME} $RPM )
-  ARCH=$(deb -qp --qf %{ARCH} $RPM )
-  VERSION=$(deb -qp --qf %{VERSION} $RPM )
-  BUILD=$(deb -qp --qf %{RELEASE} $RPM )
+  if [ ! -f control ] ; then
+    echo "ERROR: control file not present, unable to retrieve package metadata"
+    exit 1
+  fi
+
+  while read line ; do
+    if    [[ $line =~ Package:\ (.*) ]] ; then
+      PRGNAM=${BASH_REMATCH[1]}
+    elif  [[ $line =~ Architecture:\ (.*) ]] ; then
+      ARCH=${BASH_REMATCH[1]}
+      case $ARCH in
+        i?86)  ARCH=i486 ;;
+        arm*)  ARCH=arm ;;
+        amd64) ARCH=x86_64 ;;
+      esac
+    elif  [[ $line =~ ersion:\ (.*) ]] ; then
+      VERSION=${BASH_REMATCH[1]}
+      if [[ $VERSION =~ (.*)-(.*) ]] ; then
+        VERSION=${BASH_REMATCH[1]}
+        BUILD=${BASH_REMATCH[2]}
+      else
+        BUILD=1
+      fi
+    elif  [[ $line =~ Depends:\ (.*) ]] ; then
+      REQUIRES=${BASH_REMATCH[1]}
+    elif  [[ $line =~ Description:\ (.*) ]] ; then
+      DESCRIPTION="$PRGNAM: ${BASH_REMATCH[1]}\n$PRGNAM:"
+    elif  [[ $line =~ \ (.*) ]] ; then
+      DESCRIPTION="$DESCRIPTION\n$PRGNAM: ${BASH_REMATCH[1]}"
+    fi
+  done < control
 }
 
 if [ "$1" = "" ]; then
@@ -126,106 +155,96 @@ done
 
 
 for i in $* ; do
-  
-  # Determine if this is a source or binary RPM.
-  # If we have getdebtype, use that.  Otherwise, try "file".
-  if which getdebtype 1> /dev/null 2> /dev/null; then
-    if getdebtype -n $i | grep source 1> /dev/null 2> /dev/null ; then
-      isSource=1
-    else
-      isSource=0
-    fi
-  else # use file.  This works fine on Slackware, and is the default.
-    if file $i | grep RPM | grep -w src 1> /dev/null 2> /dev/null ; then
-      isSource=1
-    else
-      isSource=0
-    fi
-  fi
-
+  fn=$(realpath $i)
   # Create a temporary directory:
   TMPDIR=$(make_temp_dir)
 
-  # Extract the RPM:
-  ofn=$TMPDIR/$(basename $i .deb).cpio
-  if which deb2cpio 1> /dev/null 2> /dev/null ; then
-    deb2cpio $i > $ofn 2> /dev/null
+  # Extract the deb:
+  cd $TMPDIR
+  if which ar 1> /dev/null 2> /dev/null ; then
+    ar x $fn 2> /dev/null
     if [ ! $? = 0 ]; then
-      echo "ERROR:  deb2cpio failed.  (maybe $i is not an RPM?)"
+      echo "ERROR:  ar failed.  (maybe $fn is not a DEB?)"
       rm -rf $TMPDIR
       continue
     fi
-  else # less reliable than deb2cpio...
-    ( dd ibs=$(deboffset < $i) skip=1 if=$i 2> /dev/null | gzip -dc > $ofn 2>/dev/null ) || \
-    ( dd ibs=$(deboffset < $i) skip=1 if=$i 2> /dev/null | bzip2 -dc > $ofn 2>/dev/null )
+  else
+    echo "ERROR: ar not installed, bailing"
+    exit 1
   fi
-  DEST=$TMPDIR
-  if [ "$isSource" = "1" ]; then
-     DEST=$DEST/$(basename $(basename $i .deb) .src)
-  fi
-  mkdir -p $DEST
-  ( cd $DEST
-    cpio -i -m -d < $ofn 1> /dev/null 2> /dev/null
-    rm -f $ofn
-    find . -type d -perm 700 -exec chmod 755 {} \;
-  )
+  PKGDIR=$TMPDIR/pkg
+  mkdir $PKGDIR
+  tar xf data.tar.?z -C pkg
+  find $PKGDIR -type d -perm 700 -exec chmod 755 {} \;
+  tar xf control.tar.?z
 
   # Save the scripts in the deb as documentation
   if [ "$DOC_SCRIPTS" = "true" ]; then
-    get_meta_data $i
-    mkdir -p $TMPDIR/usr/doc/$PRGNAM-$VERSION/
-    for state in PREIN POSTIN PREUN POSTUN ; do
-      if [ "$(deb -qp --qf %{$state} $i )" != '(none)' ] ; then
-        deb -qp --qf %{$state} $i > $TMPDIR/usr/doc/$PRGNAM-$VERSION/$state.script
+    get_meta_data
+    mkdir -p $PKGDIR/usr/doc/$PRGNAM-$VERSION/
+    for state in preinst postinst prerm postrm ; do
+      if [ -f $state ] ; then
+        cp $state $PKGDIR/usr/doc/$PRGNAM-$VERSION/$state.script
       fi
     done
   fi
 
   # Save the scripts in the deb to be installed
   if [ "$INSTALL_SCRIPTS" = "true" ]; then
-    mkdir -p $TMPDIR/install
-    echo '#!/bin/sh' > $TMPDIR/install/doinst.sh
-    for state in PREIN POSTIN ; do
-      if [ "$(deb -qp --qf %{$state} $i )" != '(none)' ] ; then
-        deb -qp --qf %{$state} $i > $TMPDIR/install/doinst.sh
-        echo "" >> $TMPDIR/install/doinst.sh
+    mkdir -p $PKGDIR/install
+    echo '#!/bin/sh' > $PKGDIR/install/doinst.sh
+    for state in preinst postinst ; do
+      if [ -f $state ] ; then
+        cat $state >> $PKGDIR/install/doinst.sh
+        echo "" >> $PKGDIR/install/doinst.sh
       fi
     done
   fi
 
   # Save the deb's requires (dependencies) as documentation
   if [ "$DOC_REQUIRES" = "true" ]; then
-    get_meta_data $i
-    mkdir -p $TMPDIR/usr/doc/$PRGNAM-$VERSION/
-    deb -qp --qf %{REQUIRES} $i  > $TMPDIR/usr/doc/$PRGNAM-$VERSION/README-$PRGNAM-deb-dependencies.txt
+    get_meta_data
+    mkdir -p $PKGDIR/usr/doc/$PRGNAM-$VERSION/
+    echo $REQUIRES > $PKGDIR/usr/doc/$PRGNAM-$VERSION/README-$PRGNAM-deb-dependencies.txt
   fi
 
   # Save the deb's summary and description as the slack-desc
   if [ "$DESC" = "true" ]; then
-    mkdir -p $TMPDIR/install
-    deb -qp --qf %{SUMMARY} $i | sed -l 70 -r "s/^(.*)/$PRGNAM: $PRGNAM - \1\n/" > $TMPDIR/install/slack-desc
-    deb -qp --qf %{DESCRIPTION} $i | sed -l 70 -r "s/^/$PRGNAM: /" >> $TMPDIR/install/slack-desc
+    get_meta_data
+    mkdir -p $PKGDIR/install
+    echo -e $DESCRIPTION > $PKGDIR/install/slack-desc
   fi
 
   # If this program was called as "deb2targz", then repack as a plain
-  # tar+gz archive.  If it was called as "deb2tgz", use Slackware's
-  # makepkg to produce the .tgz:
+  # tar+gz archive.  If it was called as "deb2tgz/txz", use Slackware's
+  # makepkg to produce the .tgz/txz:
   if [ "$(basename $0)" = "deb2tgz" ]; then
-    ( 
-      cd $TMPDIR
+    TGZ='1'
+    EXT=tgz
+  elif [ "$(basename $0)" = "deb2txz" ]; then
+    TXZ='1'
+    EXT=txz
+  fi
+
+  if [ "$TGZ" == "1" -o "$TXZ" == "1" ]; then
+    (
       if [ "$META_NAME" = "true" ]; then
-        get_meta_data $CWD/$i
-        makepkg -l y -c n $CWD/$PRGNAM-$VERSION-$ARCH-${BUILD}.tgz
+        get_meta_data
+        cd $PKGDIR
+        makepkg -l y -c n $CWD/$PRGNAM-$VERSION-$ARCH-${BUILD}.$EXT
       else
-        makepkg -l y -c n $CWD/$(basename $i .deb).tgz
+        cd $PKGDIR
+        makepkg -l y -c n $CWD/$(basename $i .deb).$EXT
       fi
     )
   else
-    ( cd $TMPDIR ; tar cf - . ) > $(basename $i .deb).tar
+    cd $CWD
+    ( cd $PKGDIR ; tar cf - . ) > $(basename $i .deb).tar
     gzip -9 $(basename $i .deb).tar
   fi
 
   # Remove temporary directory:
+  cd $CWD
   rm -rf $TMPDIR
 
 done
