@@ -1,0 +1,19 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|'
+# on the right side marks the last column you can put a character in.  You must
+# make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one space after the ':'.
+
+       |-----handy-ruler------------------------------------------------------|
+deb2tgz: deb2tgz (a tool for converting a DEB archive into a tar+gz one)
+deb2tgz:
+deb2tgz: Converts DEB format to Slackware's GNU tar + GNU zip format.  (view
+deb2tgz: converted packages with "less", install and remove with "installpkg",
+deb2tgz: "removepkg", "pkgtool", or manually with "tar").
+deb2tgz:
+deb2tgz: Converted packages come with no warranty.  ;-)
+deb2tgz:
+deb2tgz:
+deb2tgz:
+deb2tgz:
