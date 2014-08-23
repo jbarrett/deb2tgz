@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright 2014, John Barrett <john@jbrt.org>
+# Copyright 2014  John Barrett <john@jbrt.org>
 #
 # Based on rpm2targz:
 # Copyright 1997, 1998  Patrick Volkerding, Moorhead, MN USA
@@ -85,22 +85,27 @@ make_temp_dir() {
 
 # Get the meta data off of the deb
 get_meta_data() {
-  if [ ! -f control ] ; then
+  control=$TMPDIR/control
+  if [ ! -f $control ] ; then
     echo "ERROR: control file not present, unable to retrieve package metadata"
     exit 1
   fi
 
-  while read line ; do
-    if    [[ $line =~ Package:\ (.*) ]] ; then
+  TMPIFS=$IFS
+  IFS=$'\012'
+  LONGDESC=""
+
+  for line in $(cat $control) ; do
+    if    [[ $line =~ ^Package:\ (.*) ]] ; then
       PRGNAM=${BASH_REMATCH[1]}
-    elif  [[ $line =~ Architecture:\ (.*) ]] ; then
+    elif  [[ $line =~ ^Architecture:\ (.*) ]] ; then
       ARCH=${BASH_REMATCH[1]}
       case $ARCH in
         i?86)  ARCH=i486 ;;
         arm*)  ARCH=arm ;;
         amd64) ARCH=x86_64 ;;
       esac
-    elif  [[ $line =~ ersion:\ (.*) ]] ; then
+    elif  [[ $line =~ ^Version:\ (.*) ]] ; then
       VERSION=${BASH_REMATCH[1]}
       if [[ $VERSION =~ (.*)-(.*) ]] ; then
         VERSION=${BASH_REMATCH[1]}
@@ -108,14 +113,22 @@ get_meta_data() {
       else
         BUILD=1
       fi
-    elif  [[ $line =~ Depends:\ (.*) ]] ; then
+    elif  [[ $line =~ ^Depends:\ (.*) ]] ; then
       REQUIRES=${BASH_REMATCH[1]}
-    elif  [[ $line =~ Description:\ (.*) ]] ; then
-      DESCRIPTION="$PRGNAM: ${BASH_REMATCH[1]}\n$PRGNAM:"
-    elif  [[ $line =~ \ (.*) ]] ; then
-      DESCRIPTION="$DESCRIPTION\n$PRGNAM: ${BASH_REMATCH[1]}"
+    elif  [[ $line =~ ^Homepage:\ (.*) ]] ; then
+      HOMEPAGE=${BASH_REMATCH[1]}
+    elif  [[ $line =~ ^Description:\ (.*) ]] ; then
+      SHORTDESC="${BASH_REMATCH[1]}"
+    elif  [[ $line =~ ^\ +(.*) ]] ; then
+      if [ -z $LONGDESC ] ; then
+        LONGDESC="${BASH_REMATCH[1]}"
+      else
+        LONGDESC="$LONGDESC\n${BASH_REMATCH[1]}"
+      fi
     fi
-  done < control
+  done < $control
+
+  IFS=$TMPIFS
 }
 
 if [ "$1" = "" ]; then
@@ -160,31 +173,34 @@ for i in $* ; do
   TMPDIR=$(make_temp_dir)
 
   # Extract the deb:
-  cd $TMPDIR
-  if which ar 1> /dev/null 2> /dev/null ; then
-    ar x $fn 2> /dev/null
-    if [ ! $? = 0 ]; then
-      echo "ERROR:  ar failed.  (maybe $fn is not a DEB?)"
-      rm -rf $TMPDIR
-      continue
+  (
+    cd $TMPDIR
+    if which ar 1> /dev/null 2> /dev/null ; then
+      ar x $fn 2> /dev/null
+      if [ ! $? = 0 ]; then
+        echo "ERROR:  ar failed.  (maybe $fn is not a DEB?)"
+        rm -rf $TMPDIR
+        continue
+      fi
+    else
+      echo "ERROR: ar not installed, bailing"
+      exit 1
     fi
-  else
-    echo "ERROR: ar not installed, bailing"
-    exit 1
-  fi
+    exit
+  )
   PKGDIR=$TMPDIR/pkg
-  mkdir $PKGDIR
-  tar xf data.tar.?z -C pkg
+  mkdir -p $PKGDIR
+  tar xf $TMPDIR/data.tar.?z -C $PKGDIR
   find $PKGDIR -type d -perm 700 -exec chmod 755 {} \;
-  tar xf control.tar.?z
+  tar xf $TMPDIR/control.tar.?z -C $TMPDIR
 
   # Save the scripts in the deb as documentation
   if [ "$DOC_SCRIPTS" = "true" ]; then
     get_meta_data
     mkdir -p $PKGDIR/usr/doc/$PRGNAM-$VERSION/
     for state in preinst postinst prerm postrm ; do
-      if [ -f $state ] ; then
-        cp $state $PKGDIR/usr/doc/$PRGNAM-$VERSION/$state.script
+      if [ -f $TMPDIR/$state ] ; then
+        cp $TMPDIR/$state $PKGDIR/usr/doc/$PRGNAM-$VERSION/$state.script
       fi
     done
   fi
@@ -194,8 +210,8 @@ for i in $* ; do
     mkdir -p $PKGDIR/install
     echo '#!/bin/sh' > $PKGDIR/install/doinst.sh
     for state in preinst postinst ; do
-      if [ -f $state ] ; then
-        cat $state >> $PKGDIR/install/doinst.sh
+      if [ -f $TMPDIR/$state ] ; then
+        cat $TMPDIR/$state >> $PKGDIR/install/doinst.sh
         echo "" >> $PKGDIR/install/doinst.sh
       fi
     done
@@ -212,7 +228,12 @@ for i in $* ; do
   if [ "$DESC" = "true" ]; then
     get_meta_data
     mkdir -p $PKGDIR/install
-    echo -e $DESCRIPTION > $PKGDIR/install/slack-desc
+    SHORTDESC="$(echo -n "$PRGNAM ($SHORTDESC" | cut -c1-69 ))"
+    echo -ne "$PRGNAM: $SHORTDESC\n$PRGNAM:\n" > $PKGDIR/install/slack-desc
+    echo -ne "$LONGDESC" | sed -l 70 -r "s/^/$PRGNAM: /" >> $PKGDIR/install/slack-desc
+    if [ -n "$HOMEPAGE" ] ; then
+      echo -ne "\n$PRGNAM:\n$PRGNAM: $HOMEPAGE" >> $PKGDIR/install/slack-desc
+    fi
   fi
 
   # If this program was called as "deb2targz", then repack as a plain
@@ -238,13 +259,11 @@ for i in $* ; do
       fi
     )
   else
-    cd $CWD
     ( cd $PKGDIR ; tar cf - . ) > $(basename $i .deb).tar
     gzip -9 $(basename $i .deb).tar
   fi
 
   # Remove temporary directory:
-  cd $CWD
   rm -rf $TMPDIR
 
 done
