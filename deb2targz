@@ -229,33 +229,52 @@ for i in $* ; do
     get_meta_data
     mkdir -p $PKGDIR/install
     SHORTDESC="$(echo -n "$PRGNAM ($SHORTDESC" | cut -c1-69 ))"
-    echo -ne "$PRGNAM: $SHORTDESC\n$PRGNAM:\n" > $PKGDIR/install/slack-desc
-    echo -ne "$LONGDESC" | sed -l 70 -r "s/^/$PRGNAM: /" >> $PKGDIR/install/slack-desc
-    if [ -n "$HOMEPAGE" ] ; then
-      echo -ne "\n$PRGNAM:\n$PRGNAM: $HOMEPAGE" >> $PKGDIR/install/slack-desc
-    fi
+    echo -ne "$SHORTDESC\n\n$LONGDESC\n\n$HOMEPAGE" | head -n 11 | sed -r "s/^/$PRGNAM: /" > $PKGDIR/install/slack-desc
   fi
 
+  # Compress and link manpages, if any:
+  if [ -d $TMPDIR/usr/man ]; then
+    ( cd $TMPDIR/usr/man
+      for manpagedir in $(find . -type d -name "man*") ; do
+        ( cd $manpagedir
+          for eachpage in $(find . -type l -maxdepth 1) ; do
+            ln -s $( readlink $eachpage ).gz $eachpage.gz
+            rm $eachpage
+          done
+          gzip -9 *.?
+        )
+      done
+    )
+  fi
+
+  # Compress info files, if any:
+  if [ -d $TMPDIR/usr/info ]; then
+    ( cd $TMPDIR/usr/info
+      rm -f dir
+      gzip -9 *
+    )
+  fi
+ 
   # If this program was called as "deb2targz", then repack as a plain
   # tar+gz archive.  If it was called as "deb2tgz/txz", use Slackware's
   # makepkg to produce the .tgz/txz:
   if [ "$(basename $0)" = "deb2tgz" ]; then
-    TGZ='1'
+    PKG='1'
     EXT=tgz
   elif [ "$(basename $0)" = "deb2txz" ]; then
-    TXZ='1'
+    PKG='1'
     EXT=txz
   fi
 
-  if [ "$TGZ" == "1" -o "$TXZ" == "1" ]; then
+  if [ "$PKG" == "1" ]; then
     (
       if [ "$META_NAME" = "true" ]; then
         get_meta_data
         cd $PKGDIR
-        makepkg -l y -c n $CWD/$PRGNAM-$VERSION-$ARCH-${BUILD}.$EXT
+        /sbin/makepkg -l y -c n $CWD/$PRGNAM-$VERSION-$ARCH-${BUILD}.$EXT
       else
         cd $PKGDIR
-        makepkg -l y -c n $CWD/$(basename $i .deb).$EXT
+        /sbin/makepkg -l y -c n $CWD/$(basename $i .deb).$EXT
       fi
     )
   else
