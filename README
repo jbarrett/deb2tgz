@@ -1,7 +1,11 @@
-deb2tgz
-=======
+deb2targz is a tool to help create Slackware packages from Debian's .deb
+packages. Converted binary packages can then be installed/removed using the
+'installpkg/removepkg' commands, or 'pkgtool'.
 
-Debian -> tarball / Slackware package conversion tool.
+It's advisable to at least examine the converted package with 'less' to make
+sure it won't do anything too crazy to your system. Packages you install are
+your responsibility. Use rpm2targz at your own risk.
 
-Basic functionality works, needs a lot of testing and validation
+Another tool to do this can be found at https://code.google.com/p/deb2tgz/
+though this does not attempt to extraxt package metadata.
 
