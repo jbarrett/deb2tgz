@@ -190,7 +190,7 @@ for i in $* ; do
   )
   PKGDIR=$TMPDIR/pkg
   mkdir -p $PKGDIR
-  tar xf $TMPDIR/data.tar.?z -C $PKGDIR
+  tar xf $TMPDIR/data.tar.* -C $PKGDIR
   find $PKGDIR -type d -perm 700 -exec chmod 755 {} \;
   tar xf $TMPDIR/control.tar.?z -C $TMPDIR
 
