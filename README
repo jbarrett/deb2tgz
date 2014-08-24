@@ -4,8 +4,8 @@ packages. Converted binary packages can then be installed/removed using the
 
 It's advisable to at least examine the converted package with 'less' to make
 sure it won't do anything too crazy to your system. Packages you install are
-your responsibility. Use rpm2targz at your own risk.
+your responsibility. Use of deb2targz is at your own risk.
 
 Another tool to do this can be found at https://code.google.com/p/deb2tgz/
-though this does not attempt to extraxt package metadata.
+though this does not attempt to extract package metadata.
 
